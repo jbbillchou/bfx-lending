@@ -1,0 +1,12 @@
+services:
+  dashboard:
+    build: .
+    image: billchou/bfx-lending:latest
+    ports:
+      # workspace port allocation: 5150 = 上線 system 51 app（bfx-lending，容器內 5000）
+      - "5150:5000"
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+    restart: no

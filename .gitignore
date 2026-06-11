@@ -1,0 +1,27 @@
+# 敏感設定
+dashboard/config.py
+.env
+ecs-task-definition.json
+# 含個人 AWS 帳號 ID 與部署設定，朋友自架用不到
+.aws-config.env
+
+# 資料庫
+data/
+
+# 系統
+.DS_Store
+
+# IDE
+.idea/
+
+# 備份
+lending-copy.py
+
+# Skill 打包檔
+*.skill
+
+# Claude 私人設定（含敏感資訊）
+.claude/
+
+# gstack 本機資料
+.gstack/

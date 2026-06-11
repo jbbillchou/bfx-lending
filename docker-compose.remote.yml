@@ -1,0 +1,10 @@
+services:
+  dashboard:
+    image: billchou/bfx-lending:latest
+    ports:
+      - "5050:5000"
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
