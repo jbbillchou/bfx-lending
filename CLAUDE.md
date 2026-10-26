@@ -24,6 +24,9 @@ docker compose down
 
 # 手動觸發放貸腳本（容器內）
 docker compose exec dashboard python3 /app/lending.py
+
+# 資金對帳（錢包總額 vs 可用 / 掛單 / credits / loans）
+docker compose exec dashboard python3 /app/diagnose_funds.py
 ```
 
 > 本專案無獨立 test suite，也無 lint 設定。

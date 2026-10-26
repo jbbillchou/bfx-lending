@@ -338,29 +338,46 @@ def get_recent_trade_max_rates_by_period(symbol, periods, hours=6):
 
 
 def get_funding_loans():
+    """取得所有已借出（成交中）的放貸。
+
+    Bitfinex 將出借方已成交的資金分成兩個端點：
+      - funding/credits：借方已用於倉位的資金
+      - funding/loans：借方已借走但尚未用於倉位的資金
+    兩者都已離開錢包 available、都在計息，必須合併才是完整的放貸金額，
+    只查 credits 會讓 loans 那部分資金在 Dashboard 上「消失」、使用率偏低。
+    """
     result = []
+    seen_ids = set()
     for symbol in SYMBOLS:
-        api_path = f'v2/auth/r/funding/credits/f{symbol}'
-        try:
-            response = _post_with_retry(api_path)
-        except Exception:
-            continue
-        for credit in response.json():
-            period = credit[CREDIT_PERIOD]
-            mts_opening = credit[CREDIT_MTS_OPENING]
-            remaining = _calc_remaining_days(mts_opening, period)
-            _tz8 = datetime.timezone(datetime.timedelta(hours=8))
-            opened_at = datetime.datetime.fromtimestamp(mts_opening / 1000, tz=_tz8).strftime('%Y-%m-%d %H:%M')
-            amount = abs(credit[CREDIT_AMOUNT])
-            daily_rate = credit[CREDIT_RATE]
-            expected_earnings = round(amount * daily_rate * period, 6)
-            result.append({
-                'symbol': symbol,
-                'amount': amount,
-                'rate_annual_pct': _daily_to_annual_pct(daily_rate),
-                'period_days': period,
-                'remaining_days': remaining,
-                'opened_at': opened_at,
-                'expected_earnings': expected_earnings,
-            })
+        for kind in ('credits', 'loans'):
+            api_path = f'v2/auth/r/funding/{kind}/f{symbol}'
+            try:
+                response = _post_with_retry(api_path)
+            except Exception:
+                continue
+            for credit in response.json():
+                if not isinstance(credit, list) or len(credit) <= CREDIT_MTS_OPENING:
+                    continue
+                if credit[0] in seen_ids:
+                    continue
+                seen_ids.add(credit[0])
+                period = credit[CREDIT_PERIOD]
+                mts_opening = credit[CREDIT_MTS_OPENING]
+                remaining = _calc_remaining_days(mts_opening, period)
+                _tz8 = datetime.timezone(datetime.timedelta(hours=8))
+                opened_at = datetime.datetime.fromtimestamp(mts_opening / 1000, tz=_tz8).strftime('%Y-%m-%d %H:%M')
+                amount = abs(credit[CREDIT_AMOUNT])
+                daily_rate = credit[CREDIT_RATE]
+                expected_earnings = round(amount * daily_rate * period, 6)
+                result.append({
+                    'id': credit[0],
+                    'symbol': symbol,
+                    'amount': amount,
+                    'rate_annual_pct': _daily_to_annual_pct(daily_rate),
+                    'period_days': period,
+                    'remaining_days': remaining,
+                    'opened_at': opened_at,
+                    'expected_earnings': expected_earnings,
+                    'source': kind,
+                })
     return result

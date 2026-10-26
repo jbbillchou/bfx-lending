@@ -283,57 +283,50 @@ def place_lend_order(amount, rate, period, symbol):
         return None
 
 
+def _fetch_active_lent(symbol):
+    """取得出借方所有成交中的放貸（credits = 借方已用於倉位、loans = 借方借走但未使用）。
+    兩者皆為已成交資金，必須合併；任一端點失敗回傳 None，避免把缺漏誤判為新成交。"""
+    merged = {}
+    for kind in ('credits', 'loans'):
+        api_path = f'v2/auth/r/funding/{kind}/f{symbol}'
+        nonce = str(int(time.time() * 1000000))
+        body = {}
+        signature = '/api/' + api_path + nonce + json.dumps(body)
+        h = hmac.new(api_secret.encode(), signature.encode(), hashlib.sha384)
+        headers = {
+            'bfx-nonce': nonce,
+            'bfx-apikey': api_key,
+            'bfx-signature': h.hexdigest(),
+            'content-type': 'application/json'
+        }
+        try:
+            response = requests.post('https://api.bitfinex.com/' + api_path, headers=headers, data=json.dumps(body))
+        except Exception:
+            return None
+        if response.status_code != 200:
+            return None
+        for loan in response.json():
+            if isinstance(loan, list) and len(loan) >= 14:
+                merged[loan[0]] = loan
+    return list(merged.values())
+
+
 def _get_active_loan_ids(symbol):
-    api_path = f'v2/auth/r/funding/loans/f{symbol}'
-    nonce = str(int(time.time() * 1000000))
-    body = {}
-    signature = '/api/' + api_path + nonce + json.dumps(body)
-    h = hmac.new(api_secret.encode(), signature.encode(), hashlib.sha384)
-    headers = {
-        'bfx-nonce': nonce,
-        'bfx-apikey': api_key,
-        'bfx-signature': h.hexdigest(),
-        'content-type': 'application/json'
-    }
-    try:
-        response = requests.post('https://api.bitfinex.com/' + api_path, headers=headers, data=json.dumps(body))
-        if response.status_code == 200:
-            return {loan[0] for loan in response.json()}
-    except Exception:
-        pass
-    return None
+    loans = _fetch_active_lent(symbol)
+    if loans is None:
+        return None
+    return {loan[0] for loan in loans}
 
 
 def _get_active_loans_detail(symbol):
     """取得當前活躍放貸明細（ID、金額、年化利率、期數）。"""
-    api_path = f'v2/auth/r/funding/loans/f{symbol}'
-    nonce = str(int(time.time() * 1000000))
-    body = {}
-    signature = '/api/' + api_path + nonce + json.dumps(body)
-    h = hmac.new(api_secret.encode(), signature.encode(), hashlib.sha384)
-    headers = {
-        'bfx-nonce': nonce,
-        'bfx-apikey': api_key,
-        'bfx-signature': h.hexdigest(),
-        'content-type': 'application/json'
-    }
-    try:
-        response = requests.post('https://api.bitfinex.com/' + api_path, headers=headers, data=json.dumps(body))
-        if response.status_code == 200:
-            result = []
-            for loan in response.json():
-                if not isinstance(loan, list) or len(loan) < 14:
-                    continue
-                result.append({
-                    'id': loan[0],
-                    'amount': abs(loan[5]),
-                    'rate_annual_pct': round(loan[11] * 365 * 100, 4),
-                    'period_days': int(loan[12]),
-                })
-            return result
-    except Exception:
-        pass
-    return []
+    loans = _fetch_active_lent(symbol) or []
+    return [{
+        'id': loan[0],
+        'amount': abs(loan[5]),
+        'rate_annual_pct': round(loan[11] * 365 * 100, 4),
+        'period_days': int(loan[12]),
+    } for loan in loans]
 
 
 def get_open_offers(symbol):
@@ -500,6 +493,15 @@ for symbol in SYMBOLS:
     for oid in offer_ids:
         cancel_offer(oid)
         time.sleep(0.1)
+    # 取消是非同步的：資金要等掛單真正消失後才會回到 available。
+    # 若立刻查餘額，尚未釋放的資金不會被重新掛出，只能閒置到下一輪。
+    if offer_ids:
+        for _ in range(10):
+            time.sleep(0.5)
+            if not get_open_offers(symbol):
+                break
+        else:
+            print(f'  [Cancel] 等待 5 秒後仍有掛單未取消，部分資金本輪可能無法重新掛出')
 
     balance = get_balance(symbol)
     rates = get_current_lending_rate(symbol)
